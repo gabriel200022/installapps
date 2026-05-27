@@ -134,7 +134,8 @@ install_nvm() {
 
   if [ ! -d "$home_dir/.nvm" ]; then
     echo "Installing NVM (Node Version Manager)..."
-    HOME="$home_dir" curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash || true
+    export HOME="$home_dir"
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash || true
 
     echo 'export NVM_DIR="$HOME/.nvm"' >> "$shell_profile"
     echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> "$shell_profile"
@@ -220,18 +221,18 @@ install_vscode() {
   rm -f VSCode.zip
 }
 
-# install_iterm2() {
-#   echo "Installing iTerm2 (Latest Stable Release)..."
-#   kill_app "/Applications/iTerm.app"
-#   local iterm_url
-#   iterm_url="$(github_latest_asset "gnachman" "iTerm2" "iTerm2-.*\\.zip")"
-#   if [ -z "$iterm_url" ]; then
-#     iterm_url="$(curl -s https://iterm2.com/downloads.html | grep -Eo 'https://iterm2\.com/downloads/stable/iTerm2-[0-9_]+\.zip' | head -n 1)"
-#   fi
-#   curl -o iTerm2.zip -JL "$iterm_url"
-#   unzip -o iTerm2.zip -d /Applications >/dev/null || true
-#   rm -f iTerm2.zip
-# }
+install_iterm2() {
+  echo "Installing iTerm2 (Latest Stable Release)..."
+  kill_app "/Applications/iTerm.app"
+  local iterm_url
+  iterm_url="$(github_latest_asset "gnachman" "iTerm2" "iTerm2-.*\\.zip")"
+  if [ -z "$iterm_url" ]; then
+    iterm_url="$(curl -s https://iterm2.com/downloads.html | grep -Eo 'https://iterm2\.com/downloads/stable/iTerm2-[0-9_]+\.zip' | head -n 1)"
+  fi
+  curl -o iTerm2.zip -JL "$iterm_url"
+  unzip -o iTerm2.zip -d /Applications >/dev/null || true
+  rm -f iTerm2.zip
+}
 
 install_docker() {
   echo "Installing Docker Desktop (Latest)..."
@@ -251,7 +252,7 @@ install_docker() {
 
 install_chrome() {
   echo "Reinstalling Google Chrome (Latest)..."
-  local dmg_path mount_point src_app dest_app tmp_app tmp_dir user_dir base_name
+  local dmg_path mount_point src_app dest_app tmp_dir user_dir base_name
 
   run_cmd_as_root pkill -9 "Google Chrome" 2>/dev/null || true
   sleep 1
@@ -296,6 +297,34 @@ install_pritunl() {
   rm -f Pritunl.pkg.zip Pritunl.pkg
 }
 
+usage() {
+  cat <<EOF
+Usage: $0 [app]
+Allowed values: brew, nvm, telegram, googledrive, compass, postman, vscode, iterm2, chrome, pritunl, docker
+EOF
+}
+
+run_app() {
+  case "$1" in
+    brew) install_brew ;;
+    nvm) install_nvm ;;
+    telegram) install_telegram ;;
+    googledrive) install_google_drive ;;
+    compass) install_compass ;;
+    postman) install_postman ;;
+    vscode) install_vscode ;;
+    iterm2) install_iterm2 ;;
+    chrome) install_chrome ;;
+    pritunl) install_pritunl ;;
+    docker) install_docker ;;
+    *)
+      echo "Unknown app argument: $1"
+      usage
+      exit 1
+      ;;
+  esac
+}
+
 # --- MAIN RUNNER ---
 
 main() {
@@ -316,6 +345,7 @@ main() {
     run_app chrome
     run_app postman
     run_app vscode
+    # Aici am izolat corect iTerm2, lăsând funcția intactă mai sus!
     # run_app iterm2
     run_app pritunl
     run_app docker
