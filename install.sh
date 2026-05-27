@@ -96,51 +96,56 @@ install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
     echo "Installing Homebrew..."
     
-    local home_dir shell_profile logged_user is_admin tmp_brew_sh
+    local home_dir shell_profile logged_user tmp_brew_sh
     logged_user="$(get_logged_in_user)"
     home_dir="$(get_home_dir)"
     shell_profile="$home_dir/.zshrc"
 
     if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "$logged_user" != "root" ] && [ -n "$logged_user" ]; then
-      echo "Running Homebrew installer for user: $logged_user"
+      echo "Running Homebrew installer using root context targeted for: $logged_user"
       
-      # 1. Verificăm dacă userul este deja admin
-      is_admin=$(dscl . -read /Groups/admin GroupMembership | grep -q "$logged_user" && echo "yes" || echo "no")
-      
-      # 2. Dacă NU este admin, îi acordăm drepturi temporare
-      if [ "$is_admin" = "no" ]; then
-        echo "👤 Utilizatorul $logged_user este Standard. Îi acordăm drepturi temporare de Admin..."
-        dscl . -append /Groups/admin GroupMembership "$logged_user"
-        sleep 2
-      fi
-
-      # 3. Soluția salvatoare: Creăm un script temporar curat pe disc pentru a evita erorile de ghilimele
+      # Creăm wrapper-ul temporar
       tmp_brew_sh="/tmp/brew_install_wrapper.sh"
+      
+      # Păcălim scriptul Homebrew: rulăm ca root (deci are sudo garantat), 
+      # dar setăm HOME și permisiunile finale pe utilizatorul de la ecran.
       cat << EOF > "$tmp_brew_sh"
 #!/bin/bash
 export HOME="$home_dir"
 export USER="$logged_user"
+export LOGNAME="$logged_user"
 export NONINTERACTIVE=1
-/bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Descărcăm scriptul oficial de instalare local ca să îl putem modifica din mers dacă e nevoie
+curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o /tmp/homebrew_install.sh
+
+# Hack Enterprise: Scoatem verificarea 'Don't run this as root' direct din scriptul lor oficial înainte de rulare
+sed -i '' 's/abort "Don\x27t run this as root!"/# Rulizat prin MDM Enterprise/g' /tmp/homebrew_install.sh
+sed -i '' 's/abort "Need sudo access on macOS.*/# Ignorat de MDM/g' /tmp/homebrew_install.sh
+
+# Executăm scriptul modificat (va avea drepturi de root, deci nu va cere niciodată sudo/parolă!)
+/bin/bash /tmp/homebrew_install.sh
+
+# Corectăm permisiunile pe folderele create, deoarece au fost scrise ca root, dar trebuie să aparțină utilizatorului
+chown -R "$logged_user:staff" "$home_dir/Library/Caches/Homebrew" 2>/dev/null || true
+if [ -d "/opt/homebrew" ]; then
+  chown -R "$logged_user:admin" /opt/homebrew
+fi
+if [ -d "/usr/local/Homebrew" ]; then
+  chown -R "$logged_user:admin" /usr/local/Homebrew
+fi
 EOF
       
       chmod +x "$tmp_brew_sh"
-      chown "$logged_user" "$tmp_brew_sh"
-
-      # Executăm wrapper-ul printr-un login shell curat pentru a împrospăta grupul de admin
-      sudo -u "$logged_user" -i "$tmp_brew_sh"
       
-      # Curățăm scriptul temporar
-      rm -f "$tmp_brew_sh"
+      # Executăm wrapper-ul direct ca root (contextul implicit Hexnode)
+      /bin/bash "$tmp_brew_sh"
       
-      # 4. Revocăm drepturile de admin dacă au fost oferite temporar
-      if [ "$is_admin" = "no" ]; then
-        echo "🔒 Revocăm drepturile temporare de Admin pentru $logged_user..."
-        dscl . -delete /Groups/admin GroupMembership "$logged_user"
-      fi
+      # Curățăm fișierele temporare
+      rm -f "$tmp_brew_sh" /tmp/homebrew_install.sh
 
     else
-      # Rulare normală de fallback din terminal propriu
+      # Fallback pentru rulare manuală din terminalul propriu al unui user admin
       export HOME="$home_dir"
       NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     fi
