@@ -96,23 +96,38 @@ install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
     echo "Installing Homebrew..."
     
-    local home_dir shell_profile logged_user
+    local home_dir shell_profile logged_user is_admin
     logged_user="$(get_logged_in_user)"
     home_dir="$(get_home_dir)"
     shell_profile="$home_dir/.zshrc"
 
-    # Dacă scriptul este rulat ca root (de către Hexnode), executăm instalarea ÎN NUMELE userului normal
     if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "$logged_user" != "root" ] && [ -n "$logged_user" ]; then
-      echo "Running Homebrew installer as user: $logged_user"
+      echo "Running Homebrew installer for user: $logged_user"
       
-      # Forțăm variabilele de mediu corecte pentru sub-procesul userului
+      # Verificăm dacă userul este deja admin sau nu
+      is_admin=$(dscl . -read /Groups/admin GroupMembership | grep -q "$logged_user" && echo "yes" || echo "no")
+      
+      # Dacă NU este admin, îl adăugăm temporar în grupul de admin ca să poată trece de scriptul Homebrew
+      if [ "$is_admin" = "no" ]; then
+        echo "👤 Utilizatorul $logged_user este Standard. Îi acordăm drepturi temporare de Admin..."
+        dscl . -append /Groups/admin GroupMembership "$logged_user"
+      fi
+
+      # Forțăm variabilele de mediu corecte
       export HOME="$home_dir"
       export USER="$logged_user"
       
-      # Modificarea magică: folosim 'sudo -u' ca root-ul să instaleze ca user normal
+      # Rulăm scriptul de instalare ca acel utilizator (acum având drepturi de sudo/admin)
       NONINTERACTIVE=1 sudo -u "$logged_user" -E /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      
+      # După ce instalarea s-a terminat, dacă i-am dat drepturi temporare, îl scoatem înapoi din grupul de admin
+      if [ "$is_admin" = "no" ]; then
+        echo "🔒 Revocăm drepturile temporare de Admin pentru $logged_user..."
+        dscl . -delete /Groups/admin GroupMembership "$logged_user"
+      fi
+
     else
-      # Rulare normală dacă scriptul a fost pornit deja dintr-un terminal de user
+      # Rulare normală de fallback
       export HOME="$home_dir"
       NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     fi
