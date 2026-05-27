@@ -316,7 +316,7 @@ main() {
     run_app chrome
     run_app postman
     run_app vscode
-    run_app iterm2
+    # run_app iterm2
     run_app pritunl
     run_app docker
   else
