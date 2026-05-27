@@ -1,18 +1,9 @@
 #!/bin/bash
-[ -n "${BASH_VERSION:-}" ] || exec /bin/bash "$0" "$@"
-set -euo pipefail
 
-ARCH="$(uname -m)"
-WORK_DIR="/var/hexnodeApp"
-mkdir -p "$WORK_DIR"
-cd "$WORK_DIR"
-
-if ! command -v curl >/dev/null 2>&1; then
-  echo "curl is not installed"
-  exit 1
-fi
-
-# --- LOGICA TA EXISTENTĂ PENTRU DETECTAREA USERULUI ---
+# =====================================================================
+# 🔥 REPARARE INSTANTĂ MEDIU MDM (HEXNODE) 🔥
+# Trebuie executată înainte de set -u (unbound) sau re-apelare bash
+# =====================================================================
 get_logged_in_user() {
   /usr/bin/stat -f "%Su" /dev/console 2>/dev/null || echo ""
 }
@@ -29,20 +20,33 @@ get_home_dir() {
   echo "${home_dir:-/var/root}"
 }
 
-# =====================================================================
-# 🔥 REPARARE MEDIU MDM (HEXNODE): INJECTARE RELEASING GLOBAL FIX 🔥
-# =====================================================================
-# Pentru că Hexnode nu oferă variabilele de mediu standard, le forțăm global aici
 REAL_USER="$(get_logged_in_user)"
 REAL_HOME="$(get_home_dir)"
 
+# Injectăm variabilele de mediu vitale ca să nu mai fie goale
 export USER="${REAL_USER:-root}"
 export HOME="$REAL_HOME"
 export LOGNAME="${REAL_USER:-root}"
 
-echo "MDM Environment Fixed -> USER: $USER | HOME: $HOME"
-echo "----------------------------------------------------"
 # =====================================================================
+# Setează regulile stricte de siguranță acum că avem variabilele populate
+# =====================================================================
+[ -n "${BASH_VERSION:-}" ] || exec /bin/bash "$0" "$@"
+set -euo pipefail
+
+ARCH="$(uname -m)"
+WORK_DIR="/var/hexnodeApp"
+mkdir -p "$WORK_DIR"
+cd "$WORK_DIR"
+
+echo "MDM Environment Patched Successfully:"
+echo "-> USER: $USER | HOME: $HOME"
+echo "----------------------------------------------------"
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl is not installed"
+  exit 1
+fi
 
 run_cmd_as_root() {
   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
@@ -86,23 +90,7 @@ kill_app() {
   fi
 }
 
-get_logged_in_user() {
-  /usr/bin/stat -f "%Su" /dev/console 2>/dev/null || echo ""
-}
-
-get_home_dir() {
-  local logged_in_user
-  local home_dir
-  logged_in_user="$(get_logged_in_user)"
-  if [[ -n "$logged_in_user" && "$logged_in_user" != "root" ]]; then
-    home_dir="$(dscl . -read "/Users/$logged_in_user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
-  else
-    home_dir="/var/root"
-  fi
-  echo "${home_dir:-/var/root}"
-}
-
-# --- METODE NOI: UTILITIES ---
+# --- METODE UTILITIES ---
 
 install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
@@ -112,7 +100,7 @@ install_brew() {
     home_dir="$(get_home_dir)"
     shell_profile="$home_dir/.zshrc"
 
-    # --- REPARARE HEXNODE: Setăm variabila HOME în mod explicit pentru acest proces ---
+    # Forțăm din nou local variabila HOME pentru sub-shell-ul brew
     export HOME="$home_dir"
 
     # Rulare non-interactivă pentru instalare automatizată
@@ -155,7 +143,7 @@ install_nvm() {
   fi
 }
 
-# --- METODE EXISTENTE ACTUALIZATE PENTRU "LATEST" ---
+# --- METODE APLICAȚII ---
 
 install_telegram() {
   echo "Installing Telegram (Latest)..."
@@ -231,10 +219,8 @@ install_vscode() {
 install_iterm2() {
   echo "Installing iTerm2 (Latest Stable Release)..."
   local iterm_url
-  # Extrage dinamic ultima versiune stabilă din API-ul GitHub sau direct din release-uri
   iterm_url="$(github_latest_asset "gnachman" "iTerm2" "iTerm2-.*\\.zip")"
   
-  # Fallback inteligent în caz că pattern-ul GitHub se modifică radical
   if [ -z "$iterm_url" ]; then
     iterm_url="$(curl -s https://iterm2.com/downloads.html | grep -Eo 'https://iterm2\.com/downloads/stable/iTerm2-[0-9_]+\.zip' | head -n 1)"
   fi
@@ -471,7 +457,6 @@ main() {
   echo "--------------"
 
   if [ "$arg" = "all" ] || [ -z "$arg" ]; then
-    # Se rulează de sus în jos, aducând mai întâi utilitarele de sistem
     run_app brew
     run_app nvm
     run_app telegram
