@@ -27,7 +27,7 @@ export HOME="$REAL_HOME"
 export LOGNAME="${REAL_USER:-root}"
 
 # =====================================================================
-# Regulile stricte de siguranță (ajustate pentru toleranță la suprascriere)
+# Regulile stricte de siguranță (ajustate pentru toleranță maximă)
 # =====================================================================
 [ -n "${BASH_VERSION:-}" ] || exec /bin/bash "$0" "$@"
 set -euo pipefail
@@ -66,10 +66,12 @@ github_latest_asset() {
   local owner="$1"
   local repo="$2"
   local pattern="$3"
-  curl -s "https://api.github.com/repos/${owner}/${repo}/releases/latest" \
-    | grep -E "browser_download_url.*${pattern}" \
-    | head -n 1 \
-    | cut -d '"' -f 4
+  # Dezactivăm temporar 'set -e' pe durata apelurilor curl API pentru a preveni crash-ul la rețea
+  set +e
+  local url
+  url=$(curl -s "https://api.github.com/repos/${owner}/${repo}/releases/latest" | grep -E "browser_download_url.*${pattern}" | head -n 1 | cut -d '"' -f 4)
+  set -e
+  echo "$url"
 }
 
 kill_app() {
@@ -134,25 +136,26 @@ install_nvm() {
 
   if [ ! -d "$home_dir/.nvm" ]; then
     echo "Installing NVM (Node Version Manager)..."
-    export HOME="$home_dir"
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash || true
+    # Folosim direct variabila locală fără export global modificat destructiv
+    HOME="$home_dir" curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash || true
 
     echo 'export NVM_DIR="$HOME/.nvm"' >> "$shell_profile"
     echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> "$shell_profile"
     
     export NVM_DIR="$home_dir/.nvm"
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" || true
-
+    set +e
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
     echo "Installing latest Node.js 20..."
     nvm install 20 || true
     nvm alias default 20 || true
+    set -e
     echo "NVM and Node.js 20 installed successfully."
   else
     echo "NVM is already installed."
   fi
 }
 
-# --- METODE APLICAȚII (Cu protecție la suprascriere) ---
+# --- METODE APLICAȚII ---
 
 install_telegram() {
   echo "Installing Telegram (Latest)..."
@@ -160,8 +163,10 @@ install_telegram() {
   curl -o Telegram.dmg -JL "https://telegram.org/dl/macos"
   local mp
   mp="$(attach_dmg Telegram.dmg)"
-  cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/ || true
-  detach_dmg "$mp"
+  if [ -n "$mp" ]; then
+    cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/ || true
+    detach_dmg "$mp"
+  fi
   rm -f Telegram.dmg
 }
 
@@ -170,9 +175,13 @@ install_google_drive() {
   curl -o GoogleDrive.dmg -JL "https://dl.google.com/drive-file-stream/GoogleDrive.dmg"
   local mp pkg
   mp="$(attach_dmg GoogleDrive.dmg)"
-  pkg="$(find "$mp" -name "*.pkg" -maxdepth 3 | head -n 1)"
-  run_cmd_as_root installer -pkg "$pkg" -target / || true
-  detach_dmg "$mp"
+  if [ -n "$mp" ]; then
+    pkg="$(find "$mp" -name "*.pkg" -maxdepth 3 | head -n 1)"
+    if [ -n "$pkg" ]; then
+      run_cmd_as_root installer -pkg "$pkg" -target / || true
+    fi
+    detach_dmg "$mp"
+  fi
   rm -f GoogleDrive.dmg
 }
 
@@ -186,11 +195,15 @@ install_compass() {
     pattern="darwin-x64\\.dmg"
   fi
   compass_url="$(github_latest_asset "mongodb-js" "compass" "$pattern")"
-  curl -o mongodb-compass.dmg -JL "$compass_url"
-  mp="$(attach_dmg mongodb-compass.dmg)"
-  cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/ || true
-  detach_dmg "$mp"
-  rm -f mongodb-compass.dmg
+  if [ -n "$compass_url" ]; then
+    curl -o mongodb-compass.dmg -JL "$compass_url"
+    mp="$(attach_dmg mongodb-compass.dmg)"
+    if [ -n "$mp" ]; then
+      cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/ || true
+      detach_dmg "$mp"
+    fi
+    rm -f mongodb-compass.dmg
+  fi
 }
 
 install_postman() {
@@ -227,10 +240,10 @@ install_iterm2() {
   local iterm_url
   iterm_url="$(github_latest_asset "gnachman" "iTerm2" "iTerm2-.*\\.zip")"
   if [ -z "$iterm_url" ]; then
-    iterm_url="$(curl -s https://iterm2.com/downloads.html | grep -Eo 'https://iterm2\.com/downloads/stable/iTerm2-[0-9_]+\.zip' | head -n 1)"
+    iterm_url="https://iterm2.com/downloads/stable/iTerm2-3_5_0.zip"
   fi
   curl -o iTerm2.zip -JL "$iterm_url"
-  unzip -o iTerm2.zip -d /Applications >/dev/null || true
+  unzip -o iTerm2.zip -d /Applications/ >/dev/null || true
   rm -f iTerm2.zip
 }
 
@@ -245,8 +258,10 @@ install_docker() {
   fi
   curl -L -o Docker.dmg "$docker_url"
   mp="$(attach_dmg Docker.dmg)"
-  cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/ || true
-  detach_dmg "$mp"
+  if [ -n "$mp" ]; then
+    cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/ || true
+    detach_dmg "$mp"
+  fi
   rm -f Docker.dmg
 }
 
@@ -291,10 +306,21 @@ install_pritunl() {
   kill_app "/Applications/Pritunl.app"
   local pritunl_url
   pritunl_url="$(github_latest_asset "pritunl" "pritunl-client-electron" "Pritunl\\.pkg\\.zip")"
+  
+  # Fallback la un release stabil confirmat în caz că API-ul GitHub este temporar limitat la rată
+  if [ -z "$pritunl_url" ]; then
+    pritunl_url="https://github.com/pritunl/pritunl-client-electron/releases/download/1.3.3814.40/Pritunl.pkg.zip"
+  fi
+  
   curl -L --fail --silent --show-error -o Pritunl.pkg.zip "$pritunl_url"
   unzip -o Pritunl.pkg.zip >/dev/null || true
-  run_cmd_as_root installer -pkg Pritunl.pkg -target / || true
-  rm -f Pritunl.pkg.zip Pritunl.pkg
+  
+  # Forțăm oprirea temporară a regulii stricte doar pentru binarul de instalare al sistemului macOS
+  set +e
+  run_cmd_as_root installer -pkg Pritunl.pkg -target /
+  set -e
+  
+  rm -f Pritunl.pkg.zip Pritunl.pkg || true
 }
 
 usage() {
@@ -345,8 +371,7 @@ main() {
     run_app chrome
     run_app postman
     run_app vscode
-    # Aici am izolat corect iTerm2, lăsând funcția intactă mai sus!
-    # run_app iterm2
+    run_app iterm2
     run_app pritunl
     run_app docker
   else
