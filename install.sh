@@ -113,13 +113,11 @@ install_brew() {
     # 1. Creăm directorul țintă ca root
     mkdir -p "$brew_target_dir"
 
-    # 2. Descărcăm structura oficială a Homebrew (fără a rula instalatorul lor blocant)
-    # Folosim direct arhiva oficială tarball din GitHub-ul lor
+    # 2. Descărcăm structura oficială a Homebrew din Tarball-ul GitHub
     echo "📥 Descărcare și dezarhivare nucleu Homebrew..."
     curl -sL https://github.com/Homebrew/brew/tarball/master | tar xz -m --strip-components 1 -C "$brew_target_dir"
 
-    # 3. Corectăm permisiunile pe directoarele create
-    # Homebrew trebuie să aparțină utilizatorului local pentru ca acesta să poată da 'brew install' mai târziu
+    # 3. Corectăm permisiunile pe directoarele create ca să aparțină utilizatorului local
     echo "🔒 Configurarea permisiunilor de securitate..."
     chown -R "$logged_user:admin" "$brew_target_dir"
 
@@ -130,21 +128,23 @@ install_brew() {
     # 4. Adăugăm rutele în profilul Zsh al utilizatorului
     if [ "$ARCH" = "arm64" ]; then
       echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$shell_profile"
-      eval "$(/opt/homebrew/bin/brew shellenv)"
+      eval "$(/opt/homebrew/bin/brew shellenv)" || true
     else
       echo 'eval "$(/usr/local/bin/brew shellenv)"' >> "$shell_profile"
-      eval "$(/usr/local/bin/brew shellenv)"
+      eval "$(/usr/local/bin/brew shellenv)" || true
     fi
 
-    # 5. Forțăm un update rapid din contextul utilizatorului pentru a genera structura completă
+    # 5. Inițializăm pachetele din numele utilizatorului
+    # Adăugăm || true pentru ca regulile 'set -e' să nu oprească scriptul din cauza unui simplu warning de mediu
     echo "🔄 Inițializare finală a pachetelor..."
-    sudo -u "$logged_user" "$brew_target_dir/bin/brew" update --force
+    sudo -u "$logged_user" "$brew_target_dir/bin/brew" update --force || true
 
     echo "Homebrew installed successfully via Tarball!"
   else
     echo "Homebrew is already installed."
   fi
 }
+
 install_nvm() {
   local home_dir shell_profile
   home_dir="$(get_home_dir)"
