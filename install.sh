@@ -104,30 +104,34 @@ install_brew() {
     if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "$logged_user" != "root" ] && [ -n "$logged_user" ]; then
       echo "Running Homebrew installer for user: $logged_user"
       
-      # Verificăm dacă userul este deja admin sau nu
+      # 1. Verificăm dacă userul este deja admin
       is_admin=$(dscl . -read /Groups/admin GroupMembership | grep -q "$logged_user" && echo "yes" || echo "no")
       
-      # Dacă NU este admin, îl adăugăm temporar în grupul de admin ca să poată trece de scriptul Homebrew
+      # 2. Dacă NU este admin, îl adăugăm temporar
       if [ "$is_admin" = "no" ]; then
         echo "👤 Utilizatorul $logged_user este Standard. Îi acordăm drepturi temporare de Admin..."
         dscl . -append /Groups/admin GroupMembership "$logged_user"
+        # Îi dăm un moment sistemului să proceseze modificarea în baza de date dscl
+        sleep 2
       fi
 
-      # Forțăm variabilele de mediu corecte
-      export HOME="$home_dir"
-      export USER="$logged_user"
+      # 3. Executăm scriptul forțând o sesiune de login RE-INIȚIALIZATĂ (-i și re-export de variabile)
+      # Folosim o abordare combinată pentru ca utilitarul sudo să încarce noul ID de grup
+      NONINTERACTIVE=1 sudo -u "$logged_user" -i /bin/bash -c "
+        export HOME='$home_dir'
+        export USER='$logged_user'
+        export NONINTERACTIVE=1
+        /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"
+      "
       
-      # Rulăm scriptul de instalare ca acel utilizator (acum având drepturi de sudo/admin)
-      NONINTERACTIVE=1 sudo -u "$logged_user" -E /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      
-      # După ce instalarea s-a terminat, dacă i-am dat drepturi temporare, îl scoatem înapoi din grupul de admin
+      # 4. Revocăm drepturile de admin dacă au fost oferite temporar
       if [ "$is_admin" = "no" ]; then
         echo "🔒 Revocăm drepturile temporare de Admin pentru $logged_user..."
         dscl . -delete /Groups/admin GroupMembership "$logged_user"
       fi
 
     else
-      # Rulare normală de fallback
+      # Rulare normală de fallback din terminal propriu
       export HOME="$home_dir"
       NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     fi
