@@ -220,18 +220,18 @@ install_vscode() {
   rm -f VSCode.zip
 }
 
-install_iterm2() {
-  echo "Installing iTerm2 (Latest Stable Release)..."
-  kill_app "/Applications/iTerm.app"
-  local iterm_url
-  iterm_url="$(github_latest_asset "gnachman" "iTerm2" "iTerm2-.*\\.zip")"
-  if [ -z "$iterm_url" ]; then
-    iterm_url="$(curl -s https://iterm2.com/downloads.html | grep -Eo 'https://iterm2\.com/downloads/stable/iTerm2-[0-9_]+\.zip' | head -n 1)"
-  fi
-  curl -o iTerm2.zip -JL "$iterm_url"
-  unzip -o iTerm2.zip -d /Applications >/dev/null || true
-  rm -f iTerm2.zip
-}
+# install_iterm2() {
+#   echo "Installing iTerm2 (Latest Stable Release)..."
+#   kill_app "/Applications/iTerm.app"
+#   local iterm_url
+#   iterm_url="$(github_latest_asset "gnachman" "iTerm2" "iTerm2-.*\\.zip")"
+#   if [ -z "$iterm_url" ]; then
+#     iterm_url="$(curl -s https://iterm2.com/downloads.html | grep -Eo 'https://iterm2\.com/downloads/stable/iTerm2-[0-9_]+\.zip' | head -n 1)"
+#   fi
+#   curl -o iTerm2.zip -JL "$iterm_url"
+#   unzip -o iTerm2.zip -d /Applications >/dev/null || true
+#   rm -f iTerm2.zip
+# }
 
 install_docker() {
   echo "Installing Docker Desktop (Latest)..."
