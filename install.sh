@@ -96,16 +96,28 @@ install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
     echo "Installing Homebrew..."
     
-    local home_dir shell_profile
+    local home_dir shell_profile logged_user
+    logged_user="$(get_logged_in_user)"
     home_dir="$(get_home_dir)"
     shell_profile="$home_dir/.zshrc"
 
-    # Forțăm din nou local variabila HOME pentru sub-shell-ul brew
-    export HOME="$home_dir"
-
-    # Rulare non-interactivă pentru instalare automatizată
-    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    # Dacă scriptul este rulat ca root (de către Hexnode), executăm instalarea ÎN NUMELE userului normal
+    if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "$logged_user" != "root" ] && [ -n "$logged_user" ]; then
+      echo "Running Homebrew installer as user: $logged_user"
+      
+      # Forțăm variabilele de mediu corecte pentru sub-procesul userului
+      export HOME="$home_dir"
+      export USER="$logged_user"
+      
+      # Modificarea magică: folosim 'sudo -u' ca root-ul să instaleze ca user normal
+      NONINTERACTIVE=1 sudo -u "$logged_user" -E /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    else
+      # Rulare normală dacă scriptul a fost pornit deja dintr-un terminal de user
+      export HOME="$home_dir"
+      NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    fi
     
+    # Adăugăm rutele în profilul Zsh al utilizatorului
     if [ "$ARCH" = "arm64" ]; then
       echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$shell_profile"
       eval "$(/opt/homebrew/bin/brew shellenv)"
