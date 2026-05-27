@@ -75,12 +75,17 @@ get_home_dir() {
 install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
     echo "Installing Homebrew..."
-    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     
     local home_dir shell_profile
     home_dir="$(get_home_dir)"
     shell_profile="$home_dir/.zshrc"
 
+    # --- REPARARE HEXNODE: Setăm variabila HOME în mod explicit pentru acest proces ---
+    export HOME="$home_dir"
+
+    # Rulare non-interactivă pentru instalare automatizată
+    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    
     if [ "$ARCH" = "arm64" ]; then
       echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$shell_profile"
       eval "$(/opt/homebrew/bin/brew shellenv)"
