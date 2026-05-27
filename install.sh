@@ -12,6 +12,38 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
+# --- LOGICA TA EXISTENTĂ PENTRU DETECTAREA USERULUI ---
+get_logged_in_user() {
+  /usr/bin/stat -f "%Su" /dev/console 2>/dev/null || echo ""
+}
+
+get_home_dir() {
+  local logged_in_user
+  local home_dir
+  logged_in_user="$(get_logged_in_user)"
+  if [[ -n "$logged_in_user" && "$logged_in_user" != "root" ]]; then
+    home_dir="$(dscl . -read "/Users/$logged_in_user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+  else
+    home_dir="/var/root"
+  fi
+  echo "${home_dir:-/var/root}"
+}
+
+# =====================================================================
+# 🔥 REPARARE MEDIU MDM (HEXNODE): INJECTARE RELEASING GLOBAL FIX 🔥
+# =====================================================================
+# Pentru că Hexnode nu oferă variabilele de mediu standard, le forțăm global aici
+REAL_USER="$(get_logged_in_user)"
+REAL_HOME="$(get_home_dir)"
+
+export USER="${REAL_USER:-root}"
+export HOME="$REAL_HOME"
+export LOGNAME="${REAL_USER:-root}"
+
+echo "MDM Environment Fixed -> USER: $USER | HOME: $HOME"
+echo "----------------------------------------------------"
+# =====================================================================
+
 run_cmd_as_root() {
   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
     "$@"
