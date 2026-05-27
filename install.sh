@@ -96,7 +96,7 @@ install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
     echo "Installing Homebrew..."
     
-    local home_dir shell_profile logged_user is_admin
+    local home_dir shell_profile logged_user is_admin tmp_brew_sh
     logged_user="$(get_logged_in_user)"
     home_dir="$(get_home_dir)"
     shell_profile="$home_dir/.zshrc"
@@ -107,22 +107,31 @@ install_brew() {
       # 1. Verificăm dacă userul este deja admin
       is_admin=$(dscl . -read /Groups/admin GroupMembership | grep -q "$logged_user" && echo "yes" || echo "no")
       
-      # 2. Dacă NU este admin, îl adăugăm temporar
+      # 2. Dacă NU este admin, îi acordăm drepturi temporare
       if [ "$is_admin" = "no" ]; then
         echo "👤 Utilizatorul $logged_user este Standard. Îi acordăm drepturi temporare de Admin..."
         dscl . -append /Groups/admin GroupMembership "$logged_user"
-        # Îi dăm un moment sistemului să proceseze modificarea în baza de date dscl
         sleep 2
       fi
 
-      # 3. Executăm scriptul forțând o sesiune de login RE-INIȚIALIZATĂ (-i și re-export de variabile)
-      # Folosim o abordare combinată pentru ca utilitarul sudo să încarce noul ID de grup
-      NONINTERACTIVE=1 sudo -u "$logged_user" -i /bin/bash -c "
-        export HOME='$home_dir'
-        export USER='$logged_user'
-        export NONINTERACTIVE=1
-        /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"
-      "
+      # 3. Soluția salvatoare: Creăm un script temporar curat pe disc pentru a evita erorile de ghilimele
+      tmp_brew_sh="/tmp/brew_install_wrapper.sh"
+      cat << EOF > "$tmp_brew_sh"
+#!/bin/bash
+export HOME="$home_dir"
+export USER="$logged_user"
+export NONINTERACTIVE=1
+/bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+EOF
+      
+      chmod +x "$tmp_brew_sh"
+      chown "$logged_user" "$tmp_brew_sh"
+
+      # Executăm wrapper-ul printr-un login shell curat pentru a împrospăta grupul de admin
+      sudo -u "$logged_user" -i "$tmp_brew_sh"
+      
+      # Curățăm scriptul temporar
+      rm -f "$tmp_brew_sh"
       
       # 4. Revocăm drepturile de admin dacă au fost oferite temporar
       if [ "$is_admin" = "no" ]; then
