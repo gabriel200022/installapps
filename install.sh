@@ -94,63 +94,40 @@ kill_app() {
 
 install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
-    echo "Installing Homebrew..."
+    echo "Installing Homebrew via Enterprise Tarball Method..."
     
-    local home_dir shell_profile logged_user tmp_brew_sh
+    local home_dir shell_profile logged_user brew_target_dir
     logged_user="$(get_logged_in_user)"
     home_dir="$(get_home_dir)"
     shell_profile="$home_dir/.zshrc"
 
-    if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "$logged_user" != "root" ] && [ -n "$logged_user" ]; then
-      echo "Running Homebrew installer using root context targeted for: $logged_user"
-      
-      # Creăm wrapper-ul temporar
-      tmp_brew_sh="/tmp/brew_install_wrapper.sh"
-      
-      # Păcălim scriptul Homebrew: rulăm ca root (deci are sudo garantat), 
-      # dar setăm HOME și permisiunile finale pe utilizatorul de la ecran.
-      cat << EOF > "$tmp_brew_sh"
-#!/bin/bash
-export HOME="$home_dir"
-export USER="$logged_user"
-export LOGNAME="$logged_user"
-export NONINTERACTIVE=1
-
-# Descărcăm scriptul oficial de instalare local ca să îl putem modifica din mers dacă e nevoie
-curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o /tmp/homebrew_install.sh
-
-# Hack Enterprise: Scoatem verificarea 'Don't run this as root' direct din scriptul lor oficial înainte de rulare
-sed -i '' 's/abort "Don\x27t run this as root!"/# Rulizat prin MDM Enterprise/g' /tmp/homebrew_install.sh
-sed -i '' 's/abort "Need sudo access on macOS.*/# Ignorat de MDM/g' /tmp/homebrew_install.sh
-
-# Executăm scriptul modificat (va avea drepturi de root, deci nu va cere niciodată sudo/parolă!)
-/bin/bash /tmp/homebrew_install.sh
-
-# Corectăm permisiunile pe folderele create, deoarece au fost scrise ca root, dar trebuie să aparțină utilizatorului
-chown -R "$logged_user:staff" "$home_dir/Library/Caches/Homebrew" 2>/dev/null || true
-if [ -d "/opt/homebrew" ]; then
-  chown -R "$logged_user:admin" /opt/homebrew
-fi
-if [ -d "/usr/local/Homebrew" ]; then
-  chown -R "$logged_user:admin" /usr/local/Homebrew
-fi
-EOF
-      
-      chmod +x "$tmp_brew_sh"
-      
-      # Executăm wrapper-ul direct ca root (contextul implicit Hexnode)
-      /bin/bash "$tmp_brew_sh"
-      
-      # Curățăm fișierele temporare
-      rm -f "$tmp_brew_sh" /tmp/homebrew_install.sh
-
+    # Stabilim calea corectă în funcție de arhitectură
+    if [ "$ARCH" = "arm64" ]; then
+      brew_target_dir="/opt/homebrew"
     else
-      # Fallback pentru rulare manuală din terminalul propriu al unui user admin
-      export HOME="$home_dir"
-      NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      brew_target_dir="/usr/local/Homebrew"
     fi
-    
-    # Adăugăm rutele în profilul Zsh al utilizatorului
+
+    echo "Target directory: $brew_target_dir for user: $logged_user"
+
+    # 1. Creăm directorul țintă ca root
+    mkdir -p "$brew_target_dir"
+
+    # 2. Descărcăm structura oficială a Homebrew (fără a rula instalatorul lor blocant)
+    # Folosim direct arhiva oficială tarball din GitHub-ul lor
+    echo "📥 Descărcare și dezarhivare nucleu Homebrew..."
+    curl -sL https://github.com/Homebrew/brew/tarball/master | tar xz -m --strip-components 1 -C "$brew_target_dir"
+
+    # 3. Corectăm permisiunile pe directoarele create
+    # Homebrew trebuie să aparțină utilizatorului local pentru ca acesta să poată da 'brew install' mai târziu
+    echo "🔒 Configurarea permisiunilor de securitate..."
+    chown -R "$logged_user:admin" "$brew_target_dir"
+
+    # Creăm și folderul de Cache necesar pentru utilizator
+    mkdir -p "$home_dir/Library/Caches/Homebrew"
+    chown -R "$logged_user:staff" "$home_dir/Library/Caches/Homebrew"
+
+    # 4. Adăugăm rutele în profilul Zsh al utilizatorului
     if [ "$ARCH" = "arm64" ]; then
       echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$shell_profile"
       eval "$(/opt/homebrew/bin/brew shellenv)"
@@ -158,12 +135,16 @@ EOF
       echo 'eval "$(/usr/local/bin/brew shellenv)"' >> "$shell_profile"
       eval "$(/usr/local/bin/brew shellenv)"
     fi
-    echo "Homebrew installed successfully."
+
+    # 5. Forțăm un update rapid din contextul utilizatorului pentru a genera structura completă
+    echo "🔄 Inițializare finală a pachetelor..."
+    sudo -u "$logged_user" "$brew_target_dir/bin/brew" update --force
+
+    echo "Homebrew installed successfully via Tarball!"
   else
     echo "Homebrew is already installed."
   fi
 }
-
 install_nvm() {
   local home_dir shell_profile
   home_dir="$(get_home_dir)"
