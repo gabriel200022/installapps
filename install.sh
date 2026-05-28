@@ -1,34 +1,4 @@
 #!/bin/bash
-
-# =====================================================================
-# 🔥 REPARARE INSTANTĂ MEDIU MDM (HEXNODE) 🔥
-# =====================================================================
-get_logged_in_user() {
-  /usr/bin/stat -f "%Su" /dev/console 2>/dev/null || echo ""
-}
-
-get_home_dir() {
-  local logged_in_user
-  local home_dir
-  logged_user="$(get_logged_in_user)"
-  if [[ -n "$logged_user" && "$logged_user" != "root" ]]; then
-    home_dir="$(dscl . -read "/Users/$logged_user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
-  else
-    home_dir="/var/root"
-  fi
-  echo "${home_dir:-/var/root}"
-}
-
-REAL_USER="$(get_logged_in_user)"
-REAL_HOME="$(get_home_dir)"
-
-export USER="${REAL_USER:-root}"
-export HOME="$REAL_HOME"
-export LOGNAME="${REAL_USER:-root}"
-
-# =====================================================================
-# Regulile stricte de siguranță (ajustate pentru toleranță maximă)
-# =====================================================================
 [ -n "${BASH_VERSION:-}" ] || exec /bin/bash "$0" "$@"
 set -euo pipefail
 
@@ -36,10 +6,6 @@ ARCH="$(uname -m)"
 WORK_DIR="/var/hexnodeApp"
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
-
-echo "MDM Environment Patched Successfully:"
-echo "-> USER: $USER | HOME: $HOME"
-echo "----------------------------------------------------"
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "curl is not installed"
@@ -66,12 +32,10 @@ github_latest_asset() {
   local owner="$1"
   local repo="$2"
   local pattern="$3"
-  # Dezactivăm temporar 'set -e' pe durata apelurilor curl API pentru a preveni crash-ul la rețea
-  set +e
-  local url
-  url=$(curl -s "https://api.github.com/repos/${owner}/${repo}/releases/latest" | grep -E "browser_download_url.*${pattern}" | head -n 1 | cut -d '"' -f 4)
-  set -e
-  echo "$url"
+  curl -s "https://api.github.com/repos/${owner}/${repo}/releases/latest" \
+    | grep -E "browser_download_url.*${pattern}" \
+    | head -n 1 \
+    | cut -d '"' -f 4
 }
 
 kill_app() {
@@ -85,16 +49,32 @@ kill_app() {
   sleep 1
 
   if [ -d "$app_path" ]; then
-    echo "Removing existing $app_path to prevent override errors..."
+    echo "Removing existing $app_path..."
     run_cmd_as_root rm -rf "$app_path" 2>/dev/null || true
   fi
 }
 
-# --- METODE UTILITIES ---
+get_logged_in_user() {
+  /usr/bin/stat -f "%Su" /dev/console 2>/dev/null || echo ""
+}
+
+get_home_dir() {
+  local logged_in_user
+  local home_dir
+  logged_in_user="$(get_logged_in_user)"
+  if [[ -n "$logged_in_user" && "$logged_in_user" != "root" ]]; then
+    home_dir="$(dscl . -read "/Users/$logged_in_user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+  else
+    home_dir="/var/root"
+  fi
+  echo "${home_dir:-/var/root}"
+}
+
+# --- METODE UTILITIES INTEGRATE CONFORM LOGICII TALE ---
 
 install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
-    echo "Installing Homebrew via Enterprise Tarball Method..."
+    echo "Installing Homebrew via Tarball Method..."
     local home_dir shell_profile logged_user brew_target_dir
     logged_user="$(get_logged_in_user)"
     home_dir="$(get_home_dir)"
@@ -106,48 +86,53 @@ install_brew() {
       brew_target_dir="/usr/local/Homebrew"
     fi
 
-    mkdir -p "$brew_target_dir"
-    curl -sL https://github.com/Homebrew/brew/tarball/master | tar xz -m --strip-components 1 -C "$brew_target_dir"
-    chown -R "$logged_user:admin" "$brew_target_dir"
+    echo "Target directory: $brew_target_dir for user: $logged_user"
+    run_cmd_as_root mkdir -p "$brew_target_dir"
+    
+    # Descărcăm nucleul curat fără a rula instalatorul oficial blocați în regulile sudo de MDM
+    curl -sL https://github.com/Homebrew/brew/tarball/master | run_cmd_as_root tar xz -m --strip-components 1 -C "$brew_target_dir"
+    
+    echo "Configuring permissions..."
+    run_cmd_as_root chown -R "$logged_user:admin" "$brew_target_dir"
+    run_cmd_as_root mkdir -p "$home_dir/Library/Caches/Homebrew"
+    run_cmd_as_root chown -R "$logged_user:staff" "$home_dir/Library/Caches/Homebrew"
 
-    mkdir -p "$home_dir/Library/Caches/Homebrew"
-    chown -R "$logged_user:staff" "$home_dir/Library/Caches/Homebrew"
-
-    if [ "$ARCH" = "arm64" ]; then
-      echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$shell_profile"
-      eval "$(/opt/homebrew/bin/brew shellenv)" || true
-    else
-      echo 'eval "$(/usr/local/bin/brew shellenv)"' >> "$shell_profile"
-      eval "$(/usr/local/bin/brew shellenv)" || true
-    fi
-
-    echo "🔄 Inițializare finală a pachetelor..."
-    sudo -u "$logged_user" "$brew_target_dir/bin/brew" update --force || true
-    echo "Homebrew installed successfully via Tarball!"
+    # Scriem rutele în shell profile-ul userului local
+    echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$shell_profile"
+    
+    echo "Updating packages..."
+    # Dezactivăm temporar set -e pentru a tolera avertismentele de mediu din update-ul inițial Brew
+    set +e
+    sudo -u "$logged_user" "$brew_target_dir/bin/brew" update --force
+    set -e
+    echo "Homebrew installed successfully."
   else
     echo "Homebrew is already installed."
   fi
 }
 
 install_nvm() {
-  local home_dir shell_profile
+  local home_dir shell_profile logged_user
+  logged_user="$(get_logged_in_user)"
   home_dir="$(get_home_dir)"
   shell_profile="$home_dir/.zshrc"
 
   if [ ! -d "$home_dir/.nvm" ]; then
     echo "Installing NVM (Node Version Manager)..."
-    # Folosim direct variabila locală fără export global modificat destructiv
-    HOME="$home_dir" curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash || true
-
+    
+    # Rulăm curl-ul mapat pe folderul de home al utilizatorului de la ecran
+    set +e
+    HOME="$home_dir" curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+    
     echo 'export NVM_DIR="$HOME/.nvm"' >> "$shell_profile"
     echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> "$shell_profile"
     
+    # Încărcăm local contextul pentru a putea executa instalarea de Node direct din acest script ca și utilizator
     export NVM_DIR="$home_dir/.nvm"
-    set +e
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-    echo "Installing latest Node.js 20..."
-    nvm install 20 || true
-    nvm alias default 20 || true
+    
+    echo "Installing Node.js 20..."
+    sudo -u "$logged_user" -i bash -c "export NVM_DIR='$home_dir/.nvm'; [ -s \$NVM_DIR/nvm.sh ] && \. \$NVM_DIR/nvm.sh; nvm install 20 && nvm alias default 20"
     set -e
     echo "NVM and Node.js 20 installed successfully."
   else
@@ -155,131 +140,113 @@ install_nvm() {
   fi
 }
 
-# --- METODE APLICAȚII ---
+# --- METODELE TALE ORIGINALE DE APLICAȚII ---
 
 install_telegram() {
-  echo "Installing Telegram (Latest)..."
-  kill_app "/Applications/Telegram.app"
+  echo "Installing Telegram..."
   curl -o Telegram.dmg -JL "https://telegram.org/dl/macos"
   local mp
   mp="$(attach_dmg Telegram.dmg)"
-  if [ -n "$mp" ]; then
-    cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/ || true
-    detach_dmg "$mp"
-  fi
+  kill_app "/Applications/Telegram.app"
+  cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/
+  detach_dmg "$mp"
   rm -f Telegram.dmg
 }
 
 install_google_drive() {
-  echo "Installing Google Drive (Latest)..."
+  echo "Installing Google Drive..."
   curl -o GoogleDrive.dmg -JL "https://dl.google.com/drive-file-stream/GoogleDrive.dmg"
   local mp pkg
   mp="$(attach_dmg GoogleDrive.dmg)"
-  if [ -n "$mp" ]; then
-    pkg="$(find "$mp" -name "*.pkg" -maxdepth 3 | head -n 1)"
-    if [ -n "$pkg" ]; then
-      run_cmd_as_root installer -pkg "$pkg" -target / || true
-    fi
-    detach_dmg "$mp"
-  fi
+  pkg="$(find "$mp" -name "*.pkg" -maxdepth 3 | head -n 1)"
+  run_cmd_as_root installer -pkg "$pkg" -target /
+  detach_dmg "$mp"
   rm -f GoogleDrive.dmg
 }
 
 install_compass() {
-  echo "Installing MongoDB Compass (Latest Release)..."
+  echo "Installing MongoDB Compass..."
+  local compass_url mp
+  compass_url="$(github_latest_asset "mongodb-js" "compass" "darwin-arm64\\.dmg")"
+  curl -o mongodb-compass.dmg -JL "$compass_url"
+  mp="$(attach_dmg mongodb-compass.dmg)"
   kill_app "/Applications/MongoDB Compass.app"
-  local compass_url mp pattern
-  if [ "$ARCH" = "arm64" ]; then
-    pattern="darwin-arm64\\.dmg"
-  else
-    pattern="darwin-x64\\.dmg"
-  fi
-  compass_url="$(github_latest_asset "mongodb-js" "compass" "$pattern")"
-  if [ -n "$compass_url" ]; then
-    curl -o mongodb-compass.dmg -JL "$compass_url"
-    mp="$(attach_dmg mongodb-compass.dmg)"
-    if [ -n "$mp" ]; then
-      cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/ || true
-      detach_dmg "$mp"
-    fi
-    rm -f mongodb-compass.dmg
-  fi
+  cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/
+  detach_dmg "$mp"
+  rm -f mongodb-compass.dmg
 }
 
 install_postman() {
-  echo "Installing Postman (Latest)..."
-  kill_app "/Applications/Postman.app"
+  echo "Installing Postman..."
   local postman_url
   if [ "$ARCH" = "arm64" ]; then
     postman_url="https://dl.pstmn.io/download/latest/osx_arm64"
   else
     postman_url="https://dl.pstmn.io/download/latest/osx_64"
   fi
+
   curl -L -o Postman.zip "$postman_url"
-  unzip -o Postman.zip -d /Applications/ >/dev/null || true
+  kill_app "/Applications/Postman.app"
+  unzip -o Postman.zip -d /Applications/ >/dev/null
   rm -f Postman.zip
 }
 
 install_vscode() {
-  echo "Installing VS Code (Latest Stable)..."
+  echo "Installing VS Code..."
+  curl -L -o VSCode.zip "https://update.code.visualstudio.com/latest/darwin-universal/stable"
   kill_app "/Applications/Visual Studio Code.app"
-  local vscode_url
-  if [ "$ARCH" = "arm64" ]; then
-    vscode_url="https://update.code.visualstudio.com/latest/darwin-arm64/stable"
-  else
-    vscode_url="https://update.code.visualstudio.com/latest/darwin/stable"
-  fi
-  curl -L -o VSCode.zip "$vscode_url"
-  unzip -o VSCode.zip -d /Applications >/dev/null || true
+  unzip -o VSCode.zip -d /Applications >/dev/null
   rm -f VSCode.zip
 }
 
 install_iterm2() {
-  echo "Installing iTerm2 (Latest Stable Release)..."
-  kill_app "/Applications/iTerm.app"
+  echo "Installing iTerm2..."
   local iterm_url
-  iterm_url="$(github_latest_asset "gnachman" "iTerm2" "iTerm2-.*\\.zip")"
-  if [ -z "$iterm_url" ]; then
-    iterm_url="https://iterm2.com/downloads/stable/iTerm2-3_5_0.zip"
-  fi
+  iterm_url="$(curl -s https://iterm2.com/downloads.html | grep -Eo 'https://iterm2\.com/downloads/stable/iTerm2-[0-9_]+\.zip' | head -n 1)"
   curl -o iTerm2.zip -JL "$iterm_url"
-  unzip -o iTerm2.zip -d /Applications/ >/dev/null || true
+  kill_app "/Applications/iTerm.app"
+  unzip -o iTerm2.zip -d /Applications >/dev/null
   rm -f iTerm2.zip
 }
 
 install_docker() {
-  echo "Installing Docker Desktop (Latest)..."
-  kill_app "/Applications/Docker.app"
+  echo "Installing Docker Desktop..."
   local docker_url mp
   if [ "$ARCH" = "arm64" ]; then
     docker_url="https://desktop.docker.com/mac/main/arm64/Docker.dmg"
   else
     docker_url="https://desktop.docker.com/mac/main/amd64/Docker.dmg"
   fi
+
   curl -L -o Docker.dmg "$docker_url"
   mp="$(attach_dmg Docker.dmg)"
-  if [ -n "$mp" ]; then
-    cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/ || true
-    detach_dmg "$mp"
-  fi
+  kill_app "/Applications/Docker.app"
+  cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/
+  detach_dmg "$mp"
   rm -f Docker.dmg
 }
 
 install_chrome() {
-  echo "Reinstalling Google Chrome (Latest)..."
-  local dmg_path mount_point src_app dest_app tmp_dir user_dir base_name
+  echo "Reinstalling Google Chrome..."
+  local dmg_path mount_point src_app dest_app tmp_app tmp_dir user_dir base_name installed_ver
 
   run_cmd_as_root pkill -9 "Google Chrome" 2>/dev/null || true
-  sleep 1
-  run_cmd_as_root rm -rf "/Applications/Google Chrome.app" || true
+  sleep 2
+
+  run_cmd_as_root rm -rf "/Applications/Google Chrome.app"
 
   for user_dir in /Users/*; do
     [[ -d "$user_dir" ]] || continue
     base_name="$(basename "$user_dir")"
     [[ "$base_name" == "Shared" ]] && continue
+
     run_cmd_as_root rm -rf "$user_dir/Library/Application Support/Google/Chrome" || true
     run_cmd_as_root rm -rf "$user_dir/Library/Caches/Google/Chrome" || true
+    run_cmd_as_root rm -rf "$user_dir/Library/Google/GoogleSoftwareUpdate" || true
   done
+
+  run_cmd_as_root rm -rf "/Library/Google/GoogleSoftwareUpdate" || true
+  run_cmd_as_root rm -rf "/Library/Application Support/Google/Chrome" || true
 
   tmp_dir="$(mktemp -d)"
   dmg_path="$tmp_dir/googlechrome.dmg"
@@ -291,42 +258,147 @@ install_chrome() {
 
   src_app="$mount_point/Google Chrome.app"
   dest_app="/Applications/Google Chrome.app"
+  tmp_app="/Applications/.Google Chrome.app.tmp"
 
-  if [[ -d "$src_app" ]]; then
-    run_cmd_as_root ditto "$src_app" "$dest_app" || true
-    run_cmd_as_root xattr -dr com.apple.quarantine "$dest_app" 2>/dev/null || true
+  if [[ ! -d "$src_app" ]]; then
+    hdiutil detach "$mount_point" -force >/dev/null || true
+    rm -rf "$tmp_dir" || true
+    echo "Google Chrome.app not found in DMG."
+    exit 1
   fi
 
-  hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true
+  run_cmd_as_root rm -rf "$tmp_app" || true
+  run_cmd_as_root ditto "$src_app" "$tmp_app"
+  run_cmd_as_root xattr -dr com.apple.quarantine "$tmp_app" 2>/dev/null || true
+  run_cmd_as_root rm -rf "$dest_app" || true
+  run_cmd_as_root mv "$tmp_app" "$dest_app"
+  run_cmd_as_root chown -R root:wheel "$dest_app" || true
+  run_cmd_as_root chmod -R go-w "$dest_app" || true
+
+  hdiutil detach "$mount_point" >/dev/null || hdiutil detach "$mount_point" -force >/dev/null || true
   rm -rf "$tmp_dir" || true
+
+  installed_ver="$(/usr/bin/defaults read "$dest_app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || true)"
+  if [[ -n "$installed_ver" ]]; then
+    echo "Google Chrome installed version: $installed_ver"
+  fi
 }
 
 install_pritunl() {
-  echo "Reinstalling Pritunl (Latest Release)..."
-  kill_app "/Applications/Pritunl.app"
-  local pritunl_url
-  pritunl_url="$(github_latest_asset "pritunl" "pritunl-client-electron" "Pritunl\\.pkg\\.zip")"
-  
-  # Fallback la un release stabil confirmat în caz că API-ul GitHub este temporar limitat la rată
-  if [ -z "$pritunl_url" ]; then
-    pritunl_url="https://github.com/pritunl/pritunl-client-electron/releases/download/1.3.3814.40/Pritunl.pkg.zip"
+  echo "Reinstalling Pritunl..."
+  local process="/Applications/Pritunl.app"
+  local home_dir app_name script_name bundle_identifier
+  home_dir="$(get_home_dir)"
+  export HOME="$home_dir"
+
+  if [ -e "$process/Contents/Info.plist" ]; then
+    echo "Pritunl found, starting cleanup..."
+    bundle_identifier=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$process/Contents/Info.plist" 2>/dev/null || true)
+    app_name="$(basename "$process" .app)"
+    script_name="$(basename "$0")"
+
+    local process_lines
+    process_lines="$(pgrep -afil "$app_name" 2>/dev/null | grep -v "$script_name" || true)"
+    if [ -n "$process_lines" ]; then
+      echo "Killing running Pritunl processes..."
+      echo "$process_lines" | awk '{print $1}' | while IFS= read -r pid; do
+        [ -n "$pid" ] && run_cmd_as_root kill "$pid" 2>/dev/null || true
+      done
+    fi
+
+    echo "Removing existing Pritunl app..."
+    run_cmd_as_root rm -rf "$process" || true
+
+    local locations=(
+      "$home_dir/Library"
+      "$home_dir/Library/Application Scripts"
+      "$home_dir/Library/Application Support"
+      "$home_dir/Library/Containers"
+      "$home_dir/Library/Caches"
+      "$home_dir/Library/HTTPStorages"
+      "$home_dir/Library/Group Containers"
+      "$home_dir/Library/LaunchAgents"
+      "$home_dir/Library/Logs"
+      "$home_dir/Library/Preferences"
+      "$home_dir/Library/Preferences/ByHost"
+      "$home_dir/Library/Saved Application State"
+      "$home_dir/Library/WebKit"
+      "/Library"
+      "/Library/Application Support"
+      "/Library/Caches"
+      "/Library/LaunchAgents"
+      "/Library/LaunchDaemons"
+      "/Library/Logs"
+      "/Library/Preferences"
+      "/Library/PrivilegedHelperTools"
+      "/private/var/db/receipts"
+      "$(getconf DARWIN_USER_CACHE_DIR | sed 's/\/$//')"
+      "$(getconf DARWIN_USER_TEMP_DIR | sed 's/\/$//')"
+    )
+    local location
+    echo "Cleaning residual paths by app name..."
+    for location in "${locations[@]}"; do
+      [[ -d "$location" ]] || continue
+      find "$location" -maxdepth 1 -iname "*$app_name*" -prune -print 2>/dev/null \
+        | while IFS= read -r p; do
+            [ -n "$p" ] && run_cmd_as_root rm -rf "$p" 2>/dev/null || true
+          done || true
+    done
+
+    if [ -n "${bundle_identifier:-}" ]; then
+      echo "Cleaning residual paths by bundle identifier..."
+      for location in "${locations[@]}"; do
+        [[ -d "$location" ]] || continue
+        find "$location" -maxdepth 1 -iname "*$bundle_identifier*" -prune -print 2>/dev/null \
+          | while IFS= read -r p; do
+              [ -n "$p" ] && run_cmd_as_root rm -rf "$p" 2>/dev/null || true
+            done || true
+      done
+    fi
+
+    echo "Removing known Pritunl paths..."
+    run_cmd_as_root rm -rf "/Library/Application Support/Pritunl" 2>/dev/null || true
+    run_cmd_as_root rm -rf "/var/lib/pritunl-client" 2>/dev/null || true
+    run_cmd_as_root rm -rf "$home_dir/Library/Preferences/com.pritunl."* 2>/dev/null || true
+    run_cmd_as_root rm -rf "$home_dir/Library/Application Support/Pritunl" 2>/dev/null || true
+    run_cmd_as_root rm -f "/Library/Application Support/Pritunl/pritunl-client.json" 2>/dev/null || true
+  else
+    echo "Pritunl not installed, installing fresh."
   fi
-  
-  curl -L --fail --silent --show-error -o Pritunl.pkg.zip "$pritunl_url"
-  unzip -o Pritunl.pkg.zip >/dev/null || true
-  
-  # Forțăm oprirea temporară a regulii stricte doar pentru binarul de instalare al sistemului macOS
-  set +e
+
+  echo "Downloading latest Pritunl package..."
+  curl -L --fail --silent --show-error -o Pritunl.pkg.zip \
+    https://github.com/pritunl/pritunl-client-electron/releases/latest/download/Pritunl.pkg.zip
+  echo "Extracting package..."
+  unzip -o Pritunl.pkg.zip >/dev/null
+  echo "Installing package..."
   run_cmd_as_root installer -pkg Pritunl.pkg -target /
-  set -e
-  
-  rm -f Pritunl.pkg.zip Pritunl.pkg || true
+  echo "Cleaning installer files..."
+  rm -f Pritunl.pkg.zip Pritunl.pkg
+  echo "Pritunl reinstall completed."
 }
 
 usage() {
   cat <<EOF
 Usage: $0 [app]
-Allowed values: brew, nvm, telegram, googledrive, compass, postman, vscode, iterm2, chrome, pritunl, docker
+
+If no app is provided, installs all apps.
+Allowed values:
+  brew
+  nvm
+  telegram
+  googledrive
+  compass
+  postman
+  vscode
+  iterm2
+  chrome
+  pritunl
+  docker
+
+Hexnode option:
+  export HEXNODE_APP_ARGUMENT=postman
+  $0
 EOF
 }
 
@@ -350,8 +422,6 @@ run_app() {
       ;;
   esac
 }
-
-# --- MAIN RUNNER ---
 
 main() {
   local arg="${1:-${HEXNODE_APP_ARGUMENT:-all}}"
@@ -378,7 +448,7 @@ main() {
     run_app "$arg"
   fi
 
-  echo "Install completed successfully."
+  echo "Install completed."
 }
 
 main "$@"
