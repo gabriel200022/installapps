@@ -70,7 +70,7 @@ get_home_dir() {
   echo "${home_dir:-/var/root}"
 }
 
-# --- METODE UTILITIES INTEGRATE CONFORM LOGICII TALE ---
+# --- UTILITIES ---
 
 install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
@@ -88,20 +88,14 @@ install_brew() {
 
     echo "Target directory: $brew_target_dir for user: $logged_user"
     run_cmd_as_root mkdir -p "$brew_target_dir"
-    
-    # Descărcăm nucleul curat fără a rula instalatorul oficial blocați în regulile sudo de MDM
     curl -sL https://github.com/Homebrew/brew/tarball/master | run_cmd_as_root tar xz -m --strip-components 1 -C "$brew_target_dir"
     
-    echo "Configuring permissions..."
     run_cmd_as_root chown -R "$logged_user:admin" "$brew_target_dir"
     run_cmd_as_root mkdir -p "$home_dir/Library/Caches/Homebrew"
     run_cmd_as_root chown -R "$logged_user:staff" "$home_dir/Library/Caches/Homebrew"
 
-    # Scriem rutele în shell profile-ul userului local
     echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$shell_profile"
     
-    echo "Updating packages..."
-    # Dezactivăm temporar set -e pentru a tolera avertismentele de mediu din update-ul inițial Brew
     set +e
     sudo -u "$logged_user" "$brew_target_dir/bin/brew" update --force
     set -e
@@ -119,19 +113,15 @@ install_nvm() {
 
   if [ ! -d "$home_dir/.nvm" ]; then
     echo "Installing NVM (Node Version Manager)..."
-    
-    # Rulăm curl-ul mapat pe folderul de home al utilizatorului de la ecran
     set +e
     HOME="$home_dir" curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
     
     echo 'export NVM_DIR="$HOME/.nvm"' >> "$shell_profile"
     echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> "$shell_profile"
     
-    # Încărcăm local contextul pentru a putea executa instalarea de Node direct din acest script ca și utilizator
     export NVM_DIR="$home_dir/.nvm"
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
     
-    echo "Installing Node.js 20..."
     sudo -u "$logged_user" -i bash -c "export NVM_DIR='$home_dir/.nvm'; [ -s \$NVM_DIR/nvm.sh ] && \. \$NVM_DIR/nvm.sh; nvm install 20 && nvm alias default 20"
     set -e
     echo "NVM and Node.js 20 installed successfully."
@@ -140,7 +130,7 @@ install_nvm() {
   fi
 }
 
-# --- METODELE TALE ORIGINALE DE APLICAȚII ---
+# --- APLICAȚII ---
 
 install_telegram() {
   echo "Installing Telegram..."
@@ -395,10 +385,6 @@ Allowed values:
   chrome
   pritunl
   docker
-
-Hexnode option:
-  export HEXNODE_APP_ARGUMENT=postman
-  $0
 EOF
 }
 
@@ -424,6 +410,7 @@ run_app() {
 }
 
 main() {
+  # Citim argumentul direct ($1) dacă e rulat manual, SAU din variabila exportată de Hexnode ($HEXNODE_APP_ARGUMENT)
   local arg="${1:-${HEXNODE_APP_ARGUMENT:-all}}"
   arg="$(echo "$arg" | tr '[:upper:]' '[:lower:]')"
 
