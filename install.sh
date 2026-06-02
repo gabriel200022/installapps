@@ -72,6 +72,38 @@ get_home_dir() {
 
 # --- UTILITIES ---
 
+install_xcode_clt() {
+  echo "Checking Xcode Command Line Tools..."
+  # Verificăm dacă uneltele de dezvoltator sunt deja active ca să nu le reinstalăm degeaba
+  if ! xcode-select -p >/dev/null 2>&1; then
+    echo "Installing Xcode Command Line Tools silențios..."
+    
+    # Truc Enterprise: Creăm un fișier temporar de tip placeholder. 
+    # Utilitarul 'softwareupdate' de la Apple caută acest fișier pentru a permite instalarea non-interactivă în fundal.
+    local clt_placeholder="/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress"
+    run_cmd_as_root touch "$clt_placeholder"
+    
+    # Interogăm serverele Apple pentru a găsi eticheta exactă a update-ului disponibil pentru versiunea curentă de macOS
+    local clt_label
+    clt_label=$(softwareupdate -l | grep -E "\*.*Command Line" | head -n 1 | awk -F"*" '{print $2}' | sed -e 's/^ *//' | tr -d '\n')
+    
+    if [ -n "$clt_label" ]; then
+      echo "📥 Descărcare și instalare din serverele Apple: $clt_label"
+      run_cmd_as_root softwareupdate -i "$clt_label" --verbose
+      echo "✅ Xcode Command Line Tools a fost instalat cu succes!"
+    else
+      echo "⚠️ Nu s-a putut detecta eticheta online. Se încearcă fallback-ul nativ..."
+      run_cmd_as_root xcode-select --install >/dev/null 2>&1 || true
+      sleep 5
+    fi
+    
+    # Ștergem fișierul temporar după finalizare
+    run_cmd_as_root rm -f "$clt_placeholder"
+  else
+    echo "Xcode Command Line Tools is already installed."
+  fi
+}
+
 install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
     echo "Installing Homebrew via Tarball Method..."
@@ -410,6 +442,7 @@ EOF
 
 run_app() {
   case "$1" in
+    clt) install_xcode_clt ;;
     brew) install_brew ;;
     nvm) install_nvm ;;
     telegram) install_telegram ;;
@@ -440,6 +473,7 @@ main() {
   echo "--------------"
 
   if [ "$arg" = "all" ] || [ -z "$arg" ]; then
+    run_app clt
     run_app brew
     run_app nvm
     run_app telegram
