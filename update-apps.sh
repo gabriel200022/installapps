@@ -326,8 +326,49 @@ uninstall_nvm() {
 }
 
 uninstall_brew() {
-  echo "🧹 Eliminare Homebrew..."
-  if [ "$ARCH" = "arm64" ]; then run_cmd_as_root rm -rf /opt/homebrew || true; else run_cmd_as_root rm -rf /usr/local/Homebrew || true; fi
+  echo "🧹 Eliminare completă Homebrew..."
+  local logged_user home_dir shell_profile
+  logged_user="$(get_logged_in_user)"
+  home_dir="$(get_home_dir)"
+  shell_profile="$home_dir/.zshrc"
+
+  # 1. Ștergem folderul principal în funcție de arhitectură
+  if [ "$ARCH" = "arm64" ]; then
+    echo "Eliminare nucleu din /opt/homebrew..."
+    run_cmd_as_root rm -rf /opt/homebrew || true
+  else
+    echo "Eliminare nucleu din /usr/local/Homebrew..."
+    run_cmd_as_root rm -rf /usr/local/Homebrew || true
+  fi
+
+  # 2. Unlink & Curățare binar din /usr/local/bin (valabil pentru ambele arhitecturi în caz de reziduuri)
+  if [ -L "/usr/local/bin/brew" ] || [ -f "/usr/local/bin/brew" ]; then
+    echo "Deconectare (unlink) binar din /usr/local/bin..."
+    run_cmd_as_root rm -f /usr/local/bin/brew || true
+  fi
+
+  # 3. Curățare chirurgicală pentru orice directoare reziduale numite brew/Homebrew din /usr/local
+  echo "Măturare foldere reziduale din /usr/local..."
+  run_cmd_as_root rm -rf /usr/local/brew || true
+  run_cmd_as_root rm -rf /usr/local/Homebrew || true
+  run_cmd_as_root rm -rf /usr/local/Cellar || true
+  run_cmd_as_root rm -rf /usr/local/Caskroom || true
+  run_cmd_as_root rm -rf /usr/local/var/homebrew || true
+  run_cmd_as_root rm -rf /usr/local/share/doc/homebrew || true
+  run_cmd_as_root rm -rf /usr/local/share/man/man1/brew.1 || true
+  run_cmd_as_root rm -rf /usr/local/share/zsh/site-functions/_brew || true
+
+  # 4. Curățare cache utilizator
+  if [ -d "$home_dir/Library/Caches/Homebrew" ]; then
+    run_cmd_as_root rm -rf "$home_dir/Library/Caches/Homebrew" || true
+  fi
+
+  # 5. Opțional: Scoatem rutele din .zshrc ca să lăsăm sistemul complet curat
+  if [ -f "$shell_profile" ]; then
+    sed -i '' '/brew shellenv/d' "$shell_profile" 2>/dev/null || true
+  fi
+
+  echo "✅ Homebrew a fost eliminat și deconectat complet din sistem."
 }
 
 uninstall_all() {
