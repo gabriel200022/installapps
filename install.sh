@@ -144,25 +144,40 @@ install_nvm() {
   shell_profile="$home_dir/.zshrc"
 
   if [ ! -d "$home_dir/.nvm" ]; then
-    echo "Installing NVM (Node Version Manager)..."
+    echo "Installing NVM (Node Version Manager) Enterprise..."
     
-    # 1. Creăm folderul și descărcăm scriptul oficial local ca să evităm pipe-urile blocate
+    # 1. Creăm manual directorul .nvm în folderul utilizatorului corect
     mkdir -p "$home_dir/.nvm"
+    
+    # 2. Descărcăm scriptul oficial local
     curl -o "$WORK_DIR/nvm_install.sh" -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh
     
-    # 2. Rulăm instalarea raportată strict la folderul Home al utilizatorului
+    # 3. Forțăm instalarea direct în contextul utilizatorului de la ecran (păcălim scriptul NVM)
     export HOME="$home_dir"
+    export USER="$logged_user"
     /bin/bash "$WORK_DIR/nvm_install.sh"
     rm -f "$WORK_DIR/nvm_install.sh"
     
-    # 3. Ne asigurăm că permisiunile pe folderul .nvm sunt ale utilizatorului de la ecran
-    chown -R "$logged_user:staff" "$home_dir/.nvm"
-
-    # 4. Scriem permanent configurarea în profilul Zsh al utilizatorului
-    echo 'export NVM_DIR="$HOME/.nvm"' >> "$shell_profile"
-    echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> "$shell_profile"
+    # 4. TRUC SNEAKY: Scriem liniile direct în .zshrc și .bash_profile al userului local, ca root
+    # Folosim direct calea absolută ca să fim siguri că nu scrie în /var/root/.zshrc
+    echo "Writing paths directly to $shell_profile"
+    run_cmd_as_root touch "$shell_profile"
+    run_cmd_as_root chmod 644 "$shell_profile"
     
-    # 5. FIX-UL CRITIC: Rulăm 'nvm install' din numele utilizatorului, dar ÎNCĂRCĂM NATIV calea din script
+    # Adăugăm configurarea cu rute absolute, nu cu $HOME (care se poate schimba sub root)
+    run_cmd_as_root bash -c "cat << 'EOF' >> '$shell_profile'
+
+# --- NVM Configurat prin Hexnode MDM ---
+export NVM_DIR=\"$home_dir/.nvm\"
+[ -s \"\$NVM_DIR/nvm.sh\" ] && \. \"\$NVM_DIR/nvm.sh\"
+[ -s \"\$NVM_DIR/bash_completion\" ] && \. \"\$NVM_DIR/bash_completion\"
+EOF"
+
+    # 5. Ne asigurăm că absolut tot ce s-a creat aparține utilizatorului tău, nu lui root
+    run_cmd_as_root chown -R "$logged_user:staff" "$home_dir/.nvm"
+    run_cmd_as_root chown "$logged_user:staff" "$shell_profile"
+    
+    # 6. Instalam Node 20 din numele utilizatorului
     echo "Installing Node.js 20..."
     set +e
     sudo -u "$logged_user" HOME="$home_dir" /bin/bash -c "
@@ -171,8 +186,6 @@ install_nvm() {
         . '\$NVM_DIR/nvm.sh'
         nvm install 20
         nvm alias default 20
-      else
-        echo '❌ Eroare gravă: Sursă nvm.sh de negăsit la calea specificată!'
       fi
     "
     set -e
