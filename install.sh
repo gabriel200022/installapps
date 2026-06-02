@@ -113,16 +113,36 @@ install_nvm() {
 
   if [ ! -d "$home_dir/.nvm" ]; then
     echo "Installing NVM (Node Version Manager)..."
-    set +e
-    HOME="$home_dir" curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
     
+    # 1. Creăm folderul și descărcăm scriptul oficial local ca să evităm pipe-urile blocate
+    mkdir -p "$home_dir/.nvm"
+    curl -o "$WORK_DIR/nvm_install.sh" -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh
+    
+    # 2. Rulăm instalarea raportată strict la folderul Home al utilizatorului
+    export HOME="$home_dir"
+    /bin/bash "$WORK_DIR/nvm_install.sh"
+    rm -f "$WORK_DIR/nvm_install.sh"
+    
+    # 3. Ne asigurăm că permisiunile pe folderul .nvm sunt ale utilizatorului de la ecran
+    chown -R "$logged_user:staff" "$home_dir/.nvm"
+
+    # 4. Scriem permanent configurarea în profilul Zsh al utilizatorului
     echo 'export NVM_DIR="$HOME/.nvm"' >> "$shell_profile"
     echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> "$shell_profile"
     
-    export NVM_DIR="$home_dir/.nvm"
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-    
-    sudo -u "$logged_user" -i bash -c "export NVM_DIR='$home_dir/.nvm'; [ -s \$NVM_DIR/nvm.sh ] && \. \$NVM_DIR/nvm.sh; nvm install 20 && nvm alias default 20"
+    # 5. FIX-UL CRITIC: Rulăm 'nvm install' din numele utilizatorului, dar ÎNCĂRCĂM NATIV calea din script
+    echo "Installing Node.js 20..."
+    set +e
+    sudo -u "$logged_user" HOME="$home_dir" /bin/bash -c "
+      export NVM_DIR='$home_dir/.nvm'
+      if [ -s '\$NVM_DIR/nvm.sh' ]; then
+        . '\$NVM_DIR/nvm.sh'
+        nvm install 20
+        nvm alias default 20
+      else
+        echo '❌ Eroare gravă: Sursă nvm.sh de negăsit la calea specificată!'
+      fi
+    "
     set -e
     echo "NVM and Node.js 20 installed successfully."
   else
