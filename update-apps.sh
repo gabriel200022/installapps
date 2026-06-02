@@ -71,7 +71,7 @@ get_home_dir() {
 }
 
 # =====================================================================
-# 📥 METODE INSTALARE
+# 📥 METODE INSTALARE (Sursă stabilă)
 # =====================================================================
 
 install_brew() {
@@ -204,7 +204,7 @@ install_docker() {
 
 install_chrome() {
   echo "Installing Google Chrome..."
-  local dmg_path mount_point src_app dest_app tmp_app tmp_dir user_dir base_name
+  local dmg_path mount_point src_app dest_app tmp_app tmp_dir
   run_cmd_as_root pkill -9 "Google Chrome" 2>/dev/null || true
   sleep 2
   run_cmd_as_root rm -rf "/Applications/Google Chrome.app"
@@ -223,25 +223,14 @@ install_chrome() {
 
 install_pritunl() {
   echo "Installing Pritunl..."
-  local process="/Applications/Pritunl.app"
-  local home_dir app_name script_name bundle_identifier
-  home_dir="$(get_home_dir)"; export HOME="$home_dir"
-  if [ -e "$process/Contents/Info.plist" ]; then
-    bundle_identifier=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$process/Contents/Info.plist" 2>/dev/null || true)
-    app_name="$(basename "$process" .app)"; script_name="$(basename "$0")"
-    local process_lines; process_lines="$(pgrep -afil "$app_name" 2>/dev/null | grep -v "$script_name" || true)"
-    if [ -n "$process_lines" ]; then
-      echo "$process_lines" | awk '{print $1}' | while IFS= read -r pid; do [ -n "$pid" ] && run_cmd_as_root kill "$pid" 2>/dev/null || true; done
-    fi
-    run_cmd_as_root rm -rf "$process" || true
-  fi
   curl -L --fail --silent --show-error -o Pritunl.pkg.zip https://github.com/pritunl/pritunl-client-electron/releases/latest/download/Pritunl.pkg.zip
-  unzip -o Pritunl.pkg.zip >/dev/null; run_cmd_as_root installer -pkg Pritunl.pkg -target /
+  unzip -o Pritunl.pkg.zip >/dev/null
+  run_cmd_as_root installer -pkg Pritunl.pkg -target /
   rm -f Pritunl.pkg.zip Pritunl.pkg
 }
 
 # =====================================================================
-# 🧹 METODE DE DEZINSTALARE (UNINSTALL)
+# 🧹 METODE DE DEZINSTALARE (UNINSTALL - Curățare profundă profile)
 # =====================================================================
 
 uninstall_chrome() {
@@ -309,14 +298,17 @@ uninstall_docker() {
 
 uninstall_pritunl() {
   echo "🧹 Dezinstalare completă Pritunl (Inclusiv Profile)..."
-  kill_app "/Applications/Pritunl.app"
+  local process="/Applications/Pritunl.app"
   local home_dir; home_dir="$(get_home_dir)"
+  kill_app "$process"
+  
   run_cmd_as_root rm -rf "/Library/Application Support/Pritunl" || true
   run_cmd_as_root rm -rf "/var/lib/pritunl-client" || true
   run_cmd_as_root rm -rf "$home_dir/Library/Preferences/com.pritunl."* || true
   run_cmd_as_root rm -rf "$home_dir/Library/Application Support/Pritunl" || true
   run_cmd_as_root rm -f "/Library/Application Support/Pritunl/pritunl-client.json" || true
-  local locations=("$home_dir/Library" "$home_dir/Library/Containers" "$home_dir/Library/Caches")
+  
+  local locations=("$home_dir/Library" "$home_dir/Library/Containers" "$home_dir/Library/Caches" "$home_dir/Library/Application Support")
   for loc in "${locations[@]}"; do
     [[ -d "$loc" ]] || continue
     find "$loc" -maxdepth 1 -iname "*pritunl*" -prune -exec run_cmd_as_root rm -rf {} \; 2>/dev/null || true
@@ -355,7 +347,7 @@ uninstall_all() {
 }
 
 # =====================================================================
-# 🔄 METODE DE REINSTALARE (REINSTALL)
+# 🔄 METODE DE REINSTALARE (REINSTALL = Ștergere profile + Instalare nouă)
 # =====================================================================
 
 reinstall_all_apps() {
@@ -373,7 +365,7 @@ reinstall_all_apps() {
 }
 
 # =====================================================================
-# 🚀 METODE DE ACTUALIZARE (UPDATE PESTE CE EXISTĂ, FĂRĂ ȘTERGERE DATE)
+# 🚀 METODE DE ACTUALIZARE (UPDATE = Doar suprascriere binar, păstrare date)
 # =====================================================================
 
 update_all_apps() {
@@ -443,7 +435,7 @@ run_app() {
     reinstall-pritunl)   uninstall_pritunl && install_pritunl ;;
     reinstall-docker)    uninstall_docker && install_docker ;;
 
-    # --- INJECTARE PARAMETRU UPDATE PESTE FIX (FĂRĂ ȘTERGERE PROFILE) ---
+    # --- UPDATE-URI (FĂRĂ ȘTERGERE PROFILE) ---
     update)              update_all_apps ;;
     update-chrome)       install_chrome ;;
     update-telegram)     install_telegram ;;
