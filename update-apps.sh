@@ -71,8 +71,33 @@ get_home_dir() {
 }
 
 # =====================================================================
-# 📥 METODE INSTALARE (Sursă stabilă)
+# 📥 METODE INSTALARE (Inclusiv Xcode CLT)
 # =====================================================================
+
+install_xcode_clt() {
+  echo "Checking Xcode Command Line Tools..."
+  if ! xcode-select -p >/dev/null 2>&1; then
+    echo "Installing Xcode Command Line Tools silențios..."
+    local clt_placeholder="/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress"
+    run_cmd_as_root touch "$clt_placeholder"
+    
+    local clt_label
+    clt_label=$(softwareupdate -l | grep -E "\*.*Command Line" | head -n 1 | awk -F"*" '{print $2}' | sed -e 's/^ *//' | tr -d '\n')
+    
+    if [ -n "$clt_label" ]; then
+      echo "📥 Descărcare și instalare din serverele Apple: $clt_label"
+      run_cmd_as_root softwareupdate -i "$clt_label" --verbose
+      echo "✅ Xcode Command Line Tools a fost instalat cu succes!"
+    else
+      echo "⚠️ Nu s-a putut detecta eticheta online. Se încearcă fallback-ul nativ..."
+      run_cmd_as_root xcode-select --install >/dev/null 2>&1 || true
+      sleep 5
+    fi
+    run_cmd_as_root rm -f "$clt_placeholder"
+  else
+    echo "Xcode Command Line Tools is already installed."
+  fi
+}
 
 install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
@@ -184,343 +209,4 @@ install_vscode() {
 }
 
 install_iterm2() {
-  echo "Installing iTerm2..."
-  local iterm_url; iterm_url="$(curl -s https://iterm2.com/downloads.html | grep -Eo 'https://iterm2\.com/downloads/stable/iTerm2-[0-9_]+\.zip' | head -n 1)"
-  curl -o iTerm2.zip -JL "$iterm_url"
-  kill_app "/Applications/iTerm.app"
-  unzip -o iTerm2.zip -d /Applications >/dev/null
-  rm -f iTerm2.zip
-}
-
-install_docker() {
-  echo "Installing Docker Desktop..."
-  local docker_url mp; if [ "$ARCH" = "arm64" ]; then docker_url="https://desktop.docker.com/mac/main/arm64/Docker.dmg"; else docker_url="https://desktop.docker.com/mac/main/amd64/Docker.dmg"; fi
-  curl -L -o Docker.dmg "$docker_url"
-  mp="$(attach_dmg Docker.dmg)"
-  kill_app "/Applications/Docker.app"
-  cp -R "$(find "$mp" -name "*.app" -maxdepth 2 | head -n 1)" /Applications/
-  detach_dmg "$mp"; rm -f Docker.dmg
-}
-
-install_chrome() {
-  echo "Installing Google Chrome..."
-  local dmg_path mount_point src_app dest_app tmp_app tmp_dir
-  run_cmd_as_root pkill -9 "Google Chrome" 2>/dev/null || true
-  sleep 2
-  run_cmd_as_root rm -rf "/Applications/Google Chrome.app"
-  tmp_dir="$(mktemp -d)"; dmg_path="$tmp_dir/googlechrome.dmg"; mount_point="$tmp_dir/mnt"; mkdir -p "$mount_point"
-  curl -L -o "$dmg_path" "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg"
-  hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_point" >/dev/null
-  src_app="$mount_point/Google Chrome.app"; dest_app="/Applications/Google Chrome.app"; tmp_app="/Applications/.Google Chrome.app.tmp"
-  run_cmd_as_root rm -rf "$tmp_app" || true
-  run_cmd_as_root ditto "$src_app" "$tmp_app"
-  run_cmd_as_root xattr -dr com.apple.quarantine "$tmp_app" 2>/dev/null || true
-  run_cmd_as_root mv "$tmp_app" "$dest_app"
-  run_cmd_as_root chown -R root:wheel "$dest_app" || true
-  run_cmd_as_root chmod -R go-w "$dest_app" || true
-  hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true; rm -rf "$tmp_dir" || true
-}
-
-install_pritunl() {
-  echo "Installing Pritunl..."
-  curl -L --fail --silent --show-error -o Pritunl.pkg.zip https://github.com/pritunl/pritunl-client-electron/releases/latest/download/Pritunl.pkg.zip
-  unzip -o Pritunl.pkg.zip >/dev/null
-  run_cmd_as_root installer -pkg Pritunl.pkg -target /
-  rm -f Pritunl.pkg.zip Pritunl.pkg
-}
-
-# =====================================================================
-# 🧹 METODE DE DEZINSTALARE (UNINSTALL - Curățare profundă profile)
-# =====================================================================
-
-uninstall_chrome() {
-  echo "🧹 Dezinstalare Google Chrome..."
-  kill_app "/Applications/Google Chrome.app"
-  local home_dir; home_dir="$(get_home_dir)"
-  run_cmd_as_root rm -rf "/Library/Application Support/Google/Chrome" || true
-  run_cmd_as_root rm -rf "/Library/Google/GoogleSoftwareUpdate" || true
-  run_cmd_as_root rm -rf "$home_dir/Library/Application Support/Google/Chrome" || true
-  run_cmd_as_root rm -rf "$home_dir/Library/Caches/Google/Chrome" || true
-  run_cmd_as_root rm -rf "$home_dir/Library/Google/GoogleSoftwareUpdate" || true
-}
-
-uninstall_telegram() {
-  echo "🧹 Dezinstalare Telegram..."
-  kill_app "/Applications/Telegram.app"
-  local home_dir; home_dir="$(get_home_dir)"
-  run_cmd_as_root rm -rf "$home_dir/Library/Application Support/Telegram Desktop" || true
-  run_cmd_as_root rm -rf "$home_dir/Library/Containers/ru.keepcoder.Telegram" || true
-}
-
-uninstall_google_drive() {
-  echo "🧹 Dezinstalare Google Drive..."
-  kill_app "/Applications/Google Drive.app"
-  local home_dir; home_dir="$(get_home_dir)"
-  run_cmd_as_root rm -rf "$home_dir/Library/Application Support/Google/DriveFS" || true
-}
-
-uninstall_compass() {
-  echo "🧹 Dezinstalare MongoDB Compass..."
-  kill_app "/Applications/MongoDB Compass.app"
-  local home_dir; home_dir="$(get_home_dir)"
-  run_cmd_as_root rm -rf "$home_dir/Library/Application Support/MongoDB Compass" || true
-}
-
-uninstall_postman() {
-  echo "🧹 Dezinstalare Postman..."
-  kill_app "/Applications/Postman.app"
-  local home_dir; home_dir="$(get_home_dir)"
-  run_cmd_as_root rm -rf "$home_dir/Library/Application Support/Postman" || true
-}
-
-uninstall_vscode() {
-  echo "🧹 Dezinstalare VS Code..."
-  kill_app "/Applications/Visual Studio Code.app"
-  local home_dir; home_dir="$(get_home_dir)"
-  run_cmd_as_root rm -rf "$home_dir/Library/Application Support/Code" || true
-  run_cmd_as_root rm -rf "$home_dir/.vscode" || true
-}
-
-uninstall_iterm2() {
-  echo "🧹 Dezinstalare iTerm2..."
-  kill_app "/Applications/iTerm.app"
-  local home_dir; home_dir="$(get_home_dir)"
-  run_cmd_as_root rm -rf "$home_dir/Library/Application Support/iTerm2" || true
-}
-
-uninstall_docker() {
-  echo "🧹 Dezinstalare Docker Desktop..."
-  kill_app "/Applications/Docker.app"
-  local home_dir; home_dir="$(get_home_dir)"
-  run_cmd_as_root rm -rf "$home_dir/Library/Containers/com.docker.docker" || true
-  run_cmd_as_root rm -rf "/Library/PrivilegedHelperTools/com.docker.vmnetd" || true
-}
-
-uninstall_pritunl() {
-  echo "🧹 Dezinstalare completă Pritunl (Inclusiv Profile)..."
-  local process="/Applications/Pritunl.app"
-  local home_dir; home_dir="$(get_home_dir)"
-  kill_app "$process"
-  
-  run_cmd_as_root rm -rf "/Library/Application Support/Pritunl" || true
-  run_cmd_as_root rm -rf "/var/lib/pritunl-client" || true
-  run_cmd_as_root rm -rf "$home_dir/Library/Preferences/com.pritunl."* || true
-  run_cmd_as_root rm -rf "$home_dir/Library/Application Support/Pritunl" || true
-  run_cmd_as_root rm -f "/Library/Application Support/Pritunl/pritunl-client.json" || true
-  
-  local locations=("$home_dir/Library" "$home_dir/Library/Containers" "$home_dir/Library/Caches" "$home_dir/Library/Application Support")
-  for loc in "${locations[@]}"; do
-    [[ -d "$loc" ]] || continue
-    find "$loc" -maxdepth 1 -iname "*pritunl*" -prune -exec run_cmd_as_root rm -rf {} \; 2>/dev/null || true
-  done
-}
-
-uninstall_nvm() {
-  echo "🧹 Eliminare NVM și Node..."
-  local home_dir shell_profile; home_dir="$(get_home_dir)"; shell_profile="$home_dir/.zshrc"
-  run_cmd_as_root rm -rf "$home_dir/.nvm" || true
-  run_cmd_as_root rm -rf "$home_dir/.npm" || true
-  if [ -f "$shell_profile" ]; then
-    sed -i '' '/NVM Configurat prin Hexnode/,/bash_completion/d' "$shell_profile" 2>/dev/null || true
-  fi
-}
-
-uninstall_brew() {
-  echo "🧹 Eliminare completă Homebrew..."
-  local logged_user home_dir shell_profile
-  logged_user="$(get_logged_in_user)"
-  home_dir="$(get_home_dir)"
-  shell_profile="$home_dir/.zshrc"
-
-  # 1. Ștergem folderul principal în funcție de arhitectură
-  if [ "$ARCH" = "arm64" ]; then
-    echo "Eliminare nucleu din /opt/homebrew..."
-    run_cmd_as_root rm -rf /opt/homebrew || true
-  else
-    echo "Eliminare nucleu din /usr/local/Homebrew..."
-    run_cmd_as_root rm -rf /usr/local/Homebrew || true
-  fi
-
-  # 2. Unlink & Curățare binar din /usr/local/bin (valabil pentru ambele arhitecturi în caz de reziduuri)
-  if [ -L "/usr/local/bin/brew" ] || [ -f "/usr/local/bin/brew" ]; then
-    echo "Deconectare (unlink) binar din /usr/local/bin..."
-    run_cmd_as_root rm -f /usr/local/bin/brew || true
-  fi
-
-  # 3. Curățare chirurgicală pentru orice directoare reziduale numite brew/Homebrew din /usr/local
-  echo "Măturare foldere reziduale din /usr/local..."
-  run_cmd_as_root rm -rf /usr/local/brew || true
-  run_cmd_as_root rm -rf /usr/local/Homebrew || true
-  run_cmd_as_root rm -rf /usr/local/Cellar || true
-  run_cmd_as_root rm -rf /usr/local/Caskroom || true
-  run_cmd_as_root rm -rf /usr/local/var/homebrew || true
-  run_cmd_as_root rm -rf /usr/local/share/doc/homebrew || true
-  run_cmd_as_root rm -rf /usr/local/share/man/man1/brew.1 || true
-  run_cmd_as_root rm -rf /usr/local/share/zsh/site-functions/_brew || true
-
-  # 4. Curățare cache utilizator
-  if [ -d "$home_dir/Library/Caches/Homebrew" ]; then
-    run_cmd_as_root rm -rf "$home_dir/Library/Caches/Homebrew" || true
-  fi
-
-  # 5. Opțional: Scoatem rutele din .zshrc ca să lăsăm sistemul complet curat
-  if [ -f "$shell_profile" ]; then
-    sed -i '' '/brew shellenv/d' "$shell_profile" 2>/dev/null || true
-  fi
-
-  echo "✅ Homebrew a fost eliminat și deconectat complet din sistem."
-}
-
-uninstall_all() {
-  echo "🔥 PORNIRE DEZINSTALARE GLOBALĂ APLICAȚII... 🔥"
-  uninstall_telegram
-  uninstall_google_drive
-  uninstall_compass
-  uninstall_chrome
-  uninstall_postman
-  uninstall_vscode
-  uninstall_iterm2
-  uninstall_pritunl
-  uninstall_docker
-  uninstall_nvm
-  uninstall_brew
-  echo "🏁 Toate aplicațiile din listă au fost șterse!"
-}
-
-# =====================================================================
-# 🔄 METODE DE REINSTALARE (REINSTALL = Ștergere profile + Instalare nouă)
-# =====================================================================
-
-reinstall_all_apps() {
-  echo "🔄 PORNIRE REINSTALARE GLOBALĂ (FĂRĂ BREW ȘI NVM)... 🔄"
-  uninstall_telegram && install_telegram
-  uninstall_google_drive && install_google_drive
-  uninstall_compass && install_compass
-  uninstall_chrome && install_chrome
-  uninstall_postman && install_postman
-  uninstall_vscode && install_vscode
-  uninstall_iterm2 && install_iterm2
-  uninstall_pritunl && install_pritunl
-  uninstall_docker && install_docker
-  echo "✅ Toate aplicațiile au fost reinstalate la curat!"
-}
-
-# =====================================================================
-# 🚀 METODE DE ACTUALIZARE (UPDATE = Doar suprascriere binar, păstrare date)
-# =====================================================================
-
-update_all_apps() {
-  echo "🚀 PORNIRE UPDATE GLOBAL PENTRU APLICAȚII (FĂRĂ BREW ȘI NVM)... 🚀"
-  install_telegram
-  install_google_drive
-  install_compass
-  install_chrome
-  install_postman
-  install_vscode
-  install_iterm2
-  install_pritunl
-  install_docker
-  echo "✅ Toate aplicațiile au primit update cu succes!"
-}
-
-# =====================================================================
-
-usage() {
-  cat <<EOF
-Usage: $0 [argument]
-Install values: brew, nvm, telegram, googledrive, compass, postman, vscode, iterm2, chrome, pritunl, docker
-Uninstall values: uninstall, uninstall-chrome, uninstall-telegram, etc.
-Reinstall values: reinstall, reinstall-chrome, reinstall-telegram, etc.
-Update values: update, update-chrome, update-telegram, etc.
-EOF
-}
-
-run_app() {
-  case "$1" in
-    # --- INSTALĂRI ---
-    brew) install_brew ;;
-    nvm) install_nvm ;;
-    telegram) install_telegram ;;
-    googledrive) install_google_drive ;;
-    compass) install_compass ;;
-    postman) install_postman ;;
-    vscode) install_vscode ;;
-    iterm2) install_iterm2 ;;
-    chrome) install_chrome ;;
-    pritunl) install_pritunl ;;
-    docker) install_docker ;;
-
-    # --- DEZINSTALĂRI ---
-    uninstall)           uninstall_all ;;
-    uninstall-chrome)    uninstall_chrome ;;
-    uninstall-telegram)  uninstall_telegram ;;
-    uninstall-drive)     uninstall_google_drive ;;
-    uninstall-compass)   uninstall_compass ;;
-    uninstall-postman)   uninstall_postman ;;
-    uninstall-vscode)    uninstall_vscode ;;
-    uninstall-iterm)     uninstall_iterm2 ;;
-    uninstall-pritunl)   uninstall_pritunl ;;
-    uninstall-docker)    uninstall_docker ;;
-    uninstall-nvm)       uninstall_nvm ;;
-    uninstall-brew)      uninstall_brew ;;
-
-    # --- REINSTALĂRI CURATE ---
-    reinstall)           reinstall_all_apps ;;
-    reinstall-chrome)    uninstall_chrome && install_chrome ;;
-    reinstall-telegram)  uninstall_telegram && install_telegram ;;
-    reinstall-drive)     uninstall_google_drive && install_google_drive ;;
-    reinstall-compass)   uninstall_compass && install_compass ;;
-    reinstall-postman)   uninstall_postman && install_postman ;;
-    reinstall-vscode)    uninstall_vscode && install_vscode ;;
-    reinstall-iterm)     uninstall_iterm2 && install_iterm2 ;;
-    reinstall-pritunl)   uninstall_pritunl && install_pritunl ;;
-    reinstall-docker)    uninstall_docker && install_docker ;;
-
-    # --- UPDATE-URI (FĂRĂ ȘTERGERE PROFILE) ---
-    update)              update_all_apps ;;
-    update-chrome)       install_chrome ;;
-    update-telegram)     install_telegram ;;
-    update-drive)        install_google_drive ;;
-    update-compass)      install_compass ;;
-    update-postman)      install_postman ;;
-    update-vscode)       install_vscode ;;
-    update-iterm)        install_iterm2 ;;
-    update-pritunl)      install_pritunl ;;
-    update-docker)       install_docker ;;
-    *)
-      echo "Unknown app argument: $1"
-      usage
-      exit 1
-      ;;
-  esac
-}
-
-main() {
-  local arg="${1:-${HEXNODE_APP_ARGUMENT:-all}}"
-  arg="$(echo "$arg" | tr '[:upper:]' '[:lower:]')"
-
-  echo "Working dir: $PWD"
-  echo "Arch: $ARCH"
-  echo "App argument: $arg"
-  echo "--------------"
-
-  if [ "$arg" = "all" ] || [ -z "$arg" ]; then
-    run_app brew
-    run_app nvm
-    run_app telegram
-    run_app googledrive
-    run_app compass
-    run_app chrome
-    run_app postman
-    run_app vscode
-    run_app iterm2
-    run_app pritunl
-    run_app docker
-  else
-    run_app "$arg"
-  fi
-
-  echo "Operation completed."
-}
-
-main "$@"
+  echo "Installing iTerm2
